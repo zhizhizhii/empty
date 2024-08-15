@@ -1,0 +1,168 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+typedef struct {
+    int id;
+    long period;
+    long deadline;
+    long WCET;
+    int priority;
+    int partition;
+    int resources_count;
+    int* resource_required_index;
+    int* resource_required_priority;
+    int* number_of_access_in_one_release;
+} SporadicTask;
+
+typedef struct {
+    int id;
+    long csl;
+    int isGlobal;
+    int partitions_count;
+    int* partitions;
+} Resource;
+
+typedef struct {
+    double** remainRate;  // Used to store the remaining frequency
+    int resourcesSize;
+    int tasksSize;
+} FlexibleWaitingPriorityAssignment;
+
+FlexibleWaitingPriorityAssignment* initAssignment(int resourcesSize, int tasksSize) {
+    FlexibleWaitingPriorityAssignment* fwpa = malloc(sizeof(FlexibleWaitingPriorityAssignment));
+    fwpa->remainRate = malloc(resourcesSize * sizeof(double*));
+    for (int i = 0; i < resourcesSize; i++) {
+        fwpa->remainRate[i] = calloc(tasksSize, sizeof(double));
+    }
+    fwpa->resourcesSize = resourcesSize;
+    fwpa->tasksSize = tasksSize;
+    return fwpa;
+}
+
+void freeAssignment(FlexibleWaitingPriorityAssignment* fwpa) {
+    for (int i = 0; i < fwpa->resourcesSize; i++) {
+        free(fwpa->remainRate[i]);
+    }
+    free(fwpa->remainRate);
+    free(fwpa);
+}
+
+void initNp(SporadicTask** tasks, int numTasks) {
+    for (int i = 0; i < numTasks; i++) {
+        for (int j = 0; j < tasks[i]->resources_count; j++) {
+            tasks[i]->resource_required_priority[j] = 998;  // Setting all to non-preemptive priority
+        }
+    }
+}
+
+int requestFrequency(SporadicTask* task, SporadicTask** tasks, int numTasks, Resource* resource) {
+    double frequency_local = 0;
+    double* frequency_remote = calloc(numTasks, sizeof(double));
+
+    for (int i = 0; i < numTasks; i++) {
+        if (tasks[i]->partition == task->partition) {
+            if (tasks[i]->priority >= task->priority) {
+                for (int j = 0; j < tasks[i]->resources_count; j++) {
+                    if (tasks[i]->resource_required_index[j] == resource->id - 1) {
+                        frequency_local += (double) (tasks[i]->number_of_access_in_one_release[j] * task->period) / tasks[i]->period;
+                    }
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < numTasks; i++) {
+        if (i == task->partition) continue;
+        for (int j = 0; j < tasks[i]->resources_count; j++) {
+            if (tasks[i]->resource_required_index[j] == resource->id - 1) {
+                frequency_remote[i] += (double) (tasks[i]->number_of_access_in_one_release[j] * task->period) / tasks[i]->period;
+            }
+        }
+    }
+
+    int flag = 1;
+    for (int i = 0; i < numTasks; i++) {
+        if (i != task->partition && frequency_local < frequency_remote[i]) {
+            flag = 0;
+            break;
+        }
+    }
+
+    free(frequency_remote);
+    return flag;
+}
+
+// Additional functions like rateE, rateS, getSlack, getMaxArrivalBlockingByMapRate, and other logic required by the original Java code need to be implemented as per above pattern.
+
+int main() {
+    int numTasks = 5;
+    int numResources = 3;
+    SporadicTask** tasks = malloc(numTasks * sizeof(SporadicTask*));
+    Resource** resources = malloc(numResources * sizeof(Resource*));
+
+    // Assuming tasks and resources are initialized here
+
+    FlexibleWaitingPriorityAssignment* fwpa = initAssignment(numResources, numTasks);
+    initNp(tasks, numTasks);
+
+    // Further logic to use the implemented functions
+
+    freeAssignment(fwpa);
+    for (int i = 0; i < numTasks; i++) {
+        free(tasks[i]->resource_required_index);
+        free(tasks[i]->resource_required_priority);
+        free(tasks[i]->number_of_access_in_one_release);
+        free(tasks[i]);
+    }
+    for (int i = 0; i < numResources; i++) {
+        free(resources[i]->partitions);
+        free(resources[i]);
+    }
+    free(tasks);
+    free(resources);
+
+    return 0;
+}
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    int id;
+    double csl;  // Critical Section Length
+} Resource;
+
+typedef struct {
+    double** remainRate;
+    int resourcesSize;
+    int tasksSize;
+} FlexibleWaitingPriorityAssignment;
+
+typedef struct {
+    int partition;
+} SporadicTask;
+
+// 假设已有 rateEk 函数的原型
+double* rateEk(SporadicTask* task, SporadicTask** tasks, int numTasks, Resource* resource);
+
+// 更新rateE函数
+void rateE(FlexibleWaitingPriorityAssignment* fwpa, SporadicTask* task, SporadicTask** tasks, int numTasks, Resource** resources, double* rateE_values) {
+    for (int k = 0; k < fwpa->resourcesSize; k++) {
+        double* rates = rateEk(task, tasks, numTasks, resources[k]);
+        memcpy(fwpa->remainRate[k], rates, sizeof(double) * fwpa->tasksSize);
+        double rate_local = fwpa->remainRate[k][task->partition];
+        double rateE = 0.0;
+
+        for (int i = 0; i < fwpa->tasksSize; i++) {
+            if (i == task->partition) continue;
+            rateE += fmin(rate_local, fwpa->remainRate[k][i]);
+            fwpa->remainRate[k][i] = fmax(0.0, fwpa->remainRate[k][i] - rate_local);
+        }
+        rateE_values[k] = rateE;
+    }
+}
+
